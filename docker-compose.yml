@@ -1,0 +1,12 @@
+# Run the whole stack from the repository root:
+#
+#   docker compose up -d --build      # first time (builds images, trains the models, runs the tests)
+#   docker compose up -d              # afterwards
+#   docker compose down               # stop
+#
+# The services are defined in shared/docker-compose.yml (paths there are relative to shared/).
+# Master dashboard: http://127.0.0.1:8080   Security dashboard: http://127.0.0.1:8501
+name: supply-chain-security
+
+include:
+  - shared/docker-compose.yml

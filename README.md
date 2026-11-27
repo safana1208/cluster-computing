@@ -61,6 +61,7 @@ loops that can run in parallel, splits them into tasks, runs those tasks on Work
 │   └── Dockerfile              test runner image
 ├── worker/                     Worker Node agent (python -m worker, or copy worker.py to a Pi)
 ├── .gitignore
+├── docker-compose.yml          `docker compose up -d` from the root (includes shared/docker-compose.yml)
 ├── README.md
 └── requirements.txt            all Python dependencies for running locally
 ```
@@ -140,16 +141,20 @@ python3 worker/worker.py --master <MASTER_IP>:7070 --token <cluster token> --slo
 The Worker Node needs only `worker/worker.py` and Python 3.
 
 ### Full stack with Docker Compose
+From the repository root:
 ```bash
-cd shared
-./run_pipeline.sh            # build, train the models, run the tests, keep the dashboards running
-# or
-docker compose up --build
+docker compose up -d --build     # first time: builds the images, trains the models, runs the tests
+docker compose up -d             # afterwards
+docker compose ps                # status
+docker compose down              # stop
 ```
 - Master dashboard: http://127.0.0.1:8080
 - Security dashboard: http://127.0.0.1:8501
-- Stop everything (from `shared/`): `docker compose down`
+- Test results: `docker compose logs tests`
 - LAN access: `MASTER_BIND=0.0.0.0 CLUSTER_BIND=0.0.0.0 CLUSTER_PUBLISH=0.0.0.0 CLUSTER_TOKEN=<16+ chars> docker compose up -d`
+
+The root `docker-compose.yml` only includes `shared/docker-compose.yml`, where the services are defined.
+`shared/run_pipeline.sh` does the same in one step and returns the test suite's exit code.
 
 ## How to test
 
@@ -165,7 +170,8 @@ This runs the 5 system tests in `tests/test_core_flow.py`. Each one starts a rea
 4. Correctness and performance: the cluster output matches the sequential run, with T_seq, T_par and the speedup reported.
 5. Fault handling: a Worker Node dies mid-run and its task is retried elsewhere; program errors are not retried.
 
-Inside Docker: `cd shared && ./run_pipeline.sh --down` (the exit code is the test suite's exit code).
+Inside Docker: `docker compose up -d --build`, then `docker compose logs tests`
+(or `shared/run_pipeline.sh --down`, whose exit code is the test suite's exit code).
 
 ## Documentation
 - `shared/docs/Dashboard_User_Guide.pdf`: user guide for the dashboard.
