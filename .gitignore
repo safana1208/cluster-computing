@@ -8,3 +8,6 @@ venv/
 .vscode/
 .idea/
 .pytest_cache/
+
+# Master runtime data: working copies, quarantine, run reports, cluster queue, logs
+master_data/

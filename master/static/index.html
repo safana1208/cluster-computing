@@ -1,0 +1,371 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cluster Computing — Master</title>
+<style>
+  body { font: 14px/1.4 system-ui, sans-serif; margin: 0 auto; max-width: 1100px; padding: 12px 16px; color: #222; background: #fff; }
+  h1 { font-size: 18px; margin: 0 0 4px; } h2 { font-size: 15px; margin: 18px 0 6px; border-bottom: 1px solid #ddd; }
+  table { border-collapse: collapse; width: 100%; } th, td { text-align: left; padding: 3px 6px; border-bottom: 1px solid #eee; vertical-align: top; }
+  th { font-weight: 600; background: #f6f6f6; } tr.sel { background: #eef4ff; } tbody tr { cursor: default; }
+  pre { background: #f6f6f6; padding: 8px; overflow: auto; max-height: 320px; margin: 4px 0; font-size: 12px; }
+  textarea { width: 100%; height: 160px; font: 12px monospace; box-sizing: border-box; }
+  button { margin: 2px 4px 2px 0; } .muted { color: #777; } .row > * { margin-right: 8px; }
+  .bad { color: #b00020; font-weight: 600; } .ok { color: #1b5e20; font-weight: 600; } .warn { color: #a15c00; font-weight: 600; }
+  #alert { display: none; background: #b00020; color: #fff; padding: 10px 12px; margin: 8px 0; border-radius: 4px; }
+  #alert ul { margin: 4px 0 0 18px; padding: 0; }
+  .num { text-align: right; font-variant-numeric: tabular-nums; }
+  details { margin: 6px 0; } summary { cursor: pointer; }
+</style>
+</head>
+<body>
+<h1>Cluster Computing — Master Server</h1>
+<div id="status" class="muted">connecting…</div>
+<div id="alert"></div>
+
+<h2>Submit (.py file or folder)</h2>
+<div class="row">
+  <label>File <input type="file" id="file" accept=".py"></label>
+  <label>Folder <input type="file" id="folder" webkitdirectory multiple></label>
+  <select id="example"><option value="">— example —</option></select>
+  <button id="submit">Submit</button>
+</div>
+<div class="row"><input id="fname" value="program.py" size="24"> <button id="resubmit">Submit edited code</button>
+  <span class="muted">edit below and resubmit; it is screened again from the beginning (FR-1.6)</span></div>
+<textarea id="src" spellcheck="false" placeholder="Python source…"></textarea>
+<div id="msg" class="muted"></div>
+
+<h2>Programs</h2>
+<table><thead><tr><th>File</th><th>Security</th><th>Eligibility</th><th>State</th>
+  <th class="num">Standard T<sub>seq</sub></th><th class="num">Cluster T<sub>par</sub></th><th class="num">Speedup</th></tr></thead>
+  <tbody id="jobs"></tbody></table>
+
+<div id="detail" style="display:none">
+  <h2 id="dtitle"></h2>
+  <div id="verdicts"></div>
+  <div id="security"></div>
+  <div id="regions"></div>
+
+  <h2>Run — standard vs. cluster</h2>
+  <div class="row">
+    <button id="runStd">Run standard</button>
+    <button id="runCl">Run cluster</button>
+    <label>workers <select id="workers"><option value="">all</option></select></label>
+    <button id="runSweep">Speedup graph (1…N)</button>
+    <label>debug <select id="debug"><option>basic</option><option>detailed</option><option>debug</option></select></label>
+    <button id="cancel">Cancel run</button>
+  </div>
+  <div id="runstate" class="muted"></div>
+  <div id="compare"></div>
+  <div id="sweep"></div>
+  <details><summary>Program output</summary><div id="outputs"></div></details>
+  <details><summary>Code: original / transformed / task templates</summary><div id="code"></div></details>
+  <details open><summary>Run log</summary><pre id="log"></pre></details>
+</div>
+
+<h2>Worker Nodes</h2>
+<table><thead><tr><th>Name</th><th>Host</th><th>State</th><th class="num">Slots</th><th class="num">Running</th>
+  <th class="num">Done</th><th class="num">Failed</th><th class="num">Last heartbeat</th><th>Platform</th></tr></thead>
+  <tbody id="workersT"></tbody></table>
+
+<h2>System self-test</h2>
+<div class="row"><button id="selftestBtn">Run system self-test</button>
+  <span class="muted">runs the project's own 5 core-flow tests (tests/test_core_flow.py) on the Master, in a separate
+  temporary Master with its own Worker Nodes; your programs and runs are not touched (about 15 s)</span></div>
+<div id="selftest"></div>
+
+<details><summary>Settings (Control Parameter File)</summary><div id="settings"></div></details>
+
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+const S = { jobs: new Map(), runs: new Map(), sel: null, report: null, status: null, config: null, examples: {} };
+
+function h(tag, attrs, ...kids) {             // all text goes through textContent (NFR-2.4)
+  const e = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs || {})) {
+    if (k === "on") for (const [ev, fn] of Object.entries(v)) e.addEventListener(ev, fn);
+    else if (v !== null && v !== undefined && v !== false) e.setAttribute(k, v);
+  }
+  for (const k of kids.flat()) if (k !== null && k !== undefined) e.append(k instanceof Node ? k : String(k));
+  return e;
+}
+const put = (e, ...kids) => e.replaceChildren(...kids.flat().filter((k) => k !== null && k !== undefined && k !== false));
+const ms = (v) => v === null || v === undefined ? "—" : (v >= 1000 ? (v / 1000).toFixed(2) + " s" : Math.round(v) + " ms");
+const x = (v) => v === null || v === undefined ? "—" : v.toFixed(2) + "×";
+const cls = (v) => ({ MALICIOUS: "bad", VIOLATION: "bad", TEST_SUITE: "ok", BLOCKED: "bad", FAILED: "bad", SAFE: "ok", READY: "ok", ELIGIBLE: "ok", COMPLETED: "ok",
+  PASSED: "ok", SUSPICIOUS: "warn", PARTIALLY_ELIGIBLE: "warn", NOT_ELIGIBLE: "warn", CANCELLED: "warn", ERROR: "bad", REJECTED: "bad" }[v] || "");
+const tag = (v) => h("span", { class: cls(v) }, v || "—");
+
+async function api(path, body) {
+  const r = await fetch(path, body === undefined ? {} : { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(typeof data.detail === "string" ? data.detail : JSON.stringify(data.detail || data));
+  return data;
+}
+const msg = (t, bad) => { $("msg").textContent = t; $("msg").className = bad ? "bad" : "muted"; };
+
+// ---------------------------------------------------------------- submit
+function readFile(f, asText) {
+  return new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = rej;
+    asText ? r.readAsText(f) : r.readAsDataURL(f); });
+}
+async function submitFiles(files) {
+  const list = [...files].filter((f) => !f.name.startsWith("."));
+  const strip = (p) => p.includes("/") ? p.split("/").slice(1).join("/") : p;   // drop the folder's own name
+  const out = [];
+  for (const f of list) {
+    const name = strip(f.webkitRelativePath || f.name);
+    if (name.endsWith(".py")) out.push({ filename: name, source: await readFile(f, true) });
+    else out.push({ filename: name, b64: (await readFile(f, false)).split(",")[1] || "" });
+  }
+  if (!out.some((f) => f.filename.endsWith(".py"))) return msg("no .py file selected (only Python code is analyzed)", true);
+  const r = await api("/api/jobs", { files: out });
+  msg(`submitted ${r.accepted.length} .py file(s)` + (r.batch ? ` as one folder; ${out.length - r.accepted.length} input file(s)` : "") +
+      (r.rejected.length ? `; rejected: ${r.rejected.map((x) => x.filename + " (" + x.reason + ")").join(", ")}` : ""));
+  if (r.accepted[0]) select(r.accepted[0].id);
+}
+$("submit").onclick = async () => {
+  try {
+    if ($("folder").files.length) return await submitFiles($("folder").files);
+    if ($("file").files.length) return await submitFiles($("file").files);
+    const ex = $("example").value;
+    if (ex) { const r = await api("/api/jobs", { example: ex }); msg("submitted example " + ex); return select(r.accepted[0].id); }
+    msg("choose a .py file, a folder or an example", true);
+  } catch (e) { msg(e.message, true); }
+};
+$("resubmit").onclick = async () => {
+  try {
+    const body = { filename: $("fname").value || "program.py", source: $("src").value };
+    if (S.sel && S.jobs.get(S.sel)?.filename === body.filename) body.resubmit_of = S.sel;   // same input files
+    const ex = S.examples[body.filename];
+    if (ex && !body.resubmit_of) { body.example = body.filename; }
+    const r = await api("/api/jobs", body); msg("submitted " + body.filename); select(r.accepted[0].id);
+  } catch (e) { msg(e.message, true); }
+};
+$("example").onchange = () => { const ex = S.examples[$("example").value]; if (ex) { $("src").value = ex.source; $("fname").value = ex.filename; } };
+$("file").onchange = async () => { const f = $("file").files[0]; if (f) { $("src").value = await readFile(f, true); $("fname").value = f.name; } };
+
+// ---------------------------------------------------------------- tables
+function latest(jobId, mode) {
+  return [...S.runs.values()].filter((r) => r.job_id === jobId && r.mode === mode && r.state === "COMPLETED").pop();
+}
+function renderJobs() {
+  const rows = [...S.jobs.values()].sort((a, b) => b.submitted_at.localeCompare(a.submitted_at)).slice(0, 60);
+  put($("jobs"), ...rows.map((j) => {
+    const std = latest(j.id, "standard") || latest(j.id, "cluster"), cl = latest(j.id, "cluster");
+    const m = cl?.metrics || {};
+    return h("tr", { class: j.id === S.sel ? "sel" : null, on: { click: () => select(j.id) } },
+      h("td", {}, j.filename, j.batch ? h("span", { class: "muted" }, " (folder)") : null),
+      h("td", {}, tag(j.security_verdict)), h("td", {}, tag(j.eligibility_verdict)), h("td", {}, tag(j.state)),
+      h("td", { class: "num" }, ms(std?.metrics?.standard?.t_seq_ms)), h("td", { class: "num" }, ms(m.cluster?.t_par_ms)),
+      h("td", { class: "num" }, x(m.speedup)));
+  }));
+}
+function renderStatus() {
+  const s = S.status; if (!s) return;
+  const c = s.cluster || {}, run = c.current_run;
+  const online = (c.workers || []).filter((w) => w.state !== "Dead").length;
+  put($("status"), 
+    s.ready ? h("span", { class: "ok" }, "ready") : h("span", { class: s.startup_error ? "bad" : "warn" }, s.startup_error || "starting…"),
+    ` · ${online} Worker Node(s) online · cluster ${c.listen || "?"} · task isolation: ${c.isolation || "?"} · AI mode: ${s.security?.ai_mode} · `,
+    run ? `running: ${run.filename} (${run.mode}) — ${run.phase}` : "idle", c.pending_runs ? ` · ${c.pending_runs} run(s) queued` : "");
+  put($("workersT"), ...[...(c.workers || []), ...(c.dead || [])].map((w) => h("tr", {},
+    h("td", {}, w.name), h("td", {}, w.host), h("td", {}, h("span", { class: { Dead: "bad", Suspect: "warn" }[w.state] || "ok" }, w.state)),
+    h("td", { class: "num" }, w.slots), h("td", { class: "num" }, w.running ?? "—"), h("td", { class: "num" }, w.done),
+    h("td", { class: "num" }, w.failed), h("td", { class: "num" }, w.state === "Dead" ? (w.reason || "") : w.last_heartbeat_s + " s"),
+    h("td", { class: "muted" }, `${w.platform || ""} py${w.python || ""} ${w.isolation || ""}`))));
+  const sel = $("workers"), n = online;
+  if (sel.options.length !== n + 1) put(sel, h("option", { value: "" }, "all"), ...Array.from({ length: n }, (_, i) => h("option", { value: i + 1 }, i + 1)));
+  if (run && run.job_id === S.sel) renderRunState(run, c.progress);
+}
+
+// ---------------------------------------------------------------- selected job
+async function select(id) {
+  S.sel = id; renderJobs();
+  try { S.report = await api("/api/jobs/" + id); } catch (e) { return msg(e.message, true); }
+  for (const r of S.report.runs || []) S.runs.set(r.id, { ...r, logs: S.runs.get(r.id)?.logs });
+  const last = (S.report.runs || [])[0];
+  if (last && !S.runs.get(last.id).logs?.length) try { S.runs.get(last.id).logs = (await api("/api/runs/" + last.id)).logs; } catch (e) { /* ignore */ }
+  renderDetail();
+}
+function renderDetail() {
+  const rep = S.report; if (!rep) return;
+  const j = S.jobs.get(S.sel) || rep.job;
+  $("detail").style.display = "";
+  $("dtitle").textContent = j.filename;
+  const sec = rep.security, el = rep.eligibility;
+  // red alert: malicious -> deleted, purged, stopped
+  const blocked = j.state === "BLOCKED", violation = j.disposition === "SECURITY_VIOLATION";
+  $("alert").style.display = blocked || violation ? "block" : "none";
+  if (blocked || violation) {
+    const findings = (sec?.layers?.policy?.findings || []).filter((f) => f.action === "block");
+    put($("alert"), h("b", {}, blocked ? `⛔ MALICIOUS — ${j.filename}` : `⛔ SECURITY VIOLATION — ${j.filename}`),
+      h("div", {}, blocked ? (j.error || "") : "Rejected and not executed: these operations are not allowed in the cluster. " +
+        "The file is kept — fix the lines below in the editor and use “Submit edited code”."),
+      h("ul", {}, ...(sec?.reasons || []).map((r) => h("li", {}, r)), ...findings.slice(0, 12).map((f) => h("li", {}, `line ${f.line}: ${f.rule} (${f.severity}) — ${f.snippet}`))));
+  }
+  put($("verdicts"), h("div", {}, "Security: ", tag(j.security_verdict), " · Eligibility: ", tag(j.eligibility_verdict),
+    " · State: ", tag(j.state), j.error ? h("span", { class: "bad" }, " — " + j.error) : ""),
+    el ? h("div", { class: "muted" }, el.summary) : null,
+    h("div", { class: "muted" }, (rep.timeline || []).map((t) => `${t.stage} ${Math.round(t.ms)} ms`).join(" → ")));
+  const warn = (sec?.layers?.policy?.findings || []);
+  put($("security"), sec && !blocked ? h("div", {}, h("b", {}, "Security screening: "), (sec.reasons || []).join("; "),
+    warn.length ? h("table", {}, h("tr", {}, h("th", {}, "Line"), h("th", {}, "Rule"), h("th", {}, "Severity"), h("th", {}, "Action"), h("th", {}, "Code")),
+      ...warn.map((f) => h("tr", {}, h("td", {}, f.line), h("td", {}, f.rule), h("td", {}, f.severity), h("td", {}, f.action), h("td", {}, f.snippet)))) : null) : "");
+  const checks = (el?.program_checks || []).filter((c) => c.status === "fail");
+  put($("regions"), el ? h("div", {},
+    ...checks.map((c) => h("div", { class: "warn" }, `${c.id} ${c.name}: ${c.detail}`)),
+    (el.regions || []).length ? h("table", {}, h("tr", {}, h("th", {}, "Region"), h("th", {}, "Kind"), h("th", {}, "Line"), h("th", {}, "Decision"), h("th", {}, "Template / reason")),
+      ...el.regions.map((r) => h("tr", {}, h("td", {}, r.id), h("td", {}, r.kind), h("td", {}, `${r.line}–${r.end_line}`),
+        h("td", {}, h("span", { class: r.decision === "GO" ? "ok" : "muted" }, r.decision)),
+        h("td", {}, r.decision === "GO" ? `${r.template}; split: ${r.split}` : `${r.failed_check || ""} ${r.reason}`)))) : null) : "");
+  const runnable = j.state === "READY";
+  for (const b of ["runStd", "runCl", "runSweep"]) $(b).disabled = !runnable;
+  $("runstate").textContent = runnable ? "" : j.state === "NOT_ELIGIBLE" ? "Not eligible for parallelization: the program is not executed (SRS 3.2, FR-3.10)."
+    : blocked ? "Blocked: nothing is executed." : violation ? "Rejected (security violation): nothing is executed." : "";
+  renderCode(rep, j); renderRuns();
+}
+function renderCode(rep, j) {
+  const el = rep.eligibility || {}, parts = [];
+  if (rep.source !== undefined) { parts.push(h("b", {}, "Original"), h("pre", {}, rep.source)); }
+  if (el.transformed_program) parts.push(h("b", {}, "Transformed (runs on the Master; GO regions call the Mediator) "),
+    h("a", { href: `/api/jobs/${j.id}/files/transformed.py` }, "download"), h("pre", {}, el.transformed_program));
+  for (const r of el.regions || []) if (r.task_template) parts.push(h("b", {}, `Task template ${r.task_name} (region ${r.id}) `),
+    h("a", { href: `/api/jobs/${j.id}/files/tasks/${r.task_name}.py` }, "download"), h("pre", {}, r.task_template));
+  put($("code"), ...parts);
+  if (rep.source !== undefined) { $("src").value = rep.source; $("fname").value = j.filename; }
+}
+function renderRunState(run, progress) {
+  const p = run.state === "RUNNING" && progress && progress.total ? ` — tasks ${progress.done}/${progress.total}` : "";
+  put($("runstate"), h("span", { class: cls(run.state) }, run.state), ` ${run.mode} · ${run.phase}${p}`,
+    run.elapsed_s ? ` · ${run.elapsed_s} s` : "", run.error ? h("div", { class: "bad" },
+      `${run.error.category} (${run.error.stage}): ${run.error.type}: ${run.error.message}` + (run.error.line ? ` — line ${run.error.line}` +
+      (run.error.line_in === "transformed program" ? " of the transformed program" : "") + (run.error.text ? `: ${run.error.text}` : "") : "")) : null);
+}
+function renderRuns() {
+  const runs = [...S.runs.values()].filter((r) => r.job_id === S.sel);
+  const last = runs[runs.length - 1];
+  if (last) renderRunState(last, S.status?.cluster?.current_run?.id === last.id ? S.status.cluster.progress : null);
+  const std = latest(S.sel, "standard"), cl = latest(S.sel, "cluster");
+  const ref = cl?.metrics?.standard || std?.metrics?.standard, par = cl?.metrics?.cluster, m = cl?.metrics || {};
+  const row = (k, a, b) => h("tr", {}, h("th", {}, k), h("td", { class: "num" }, a), h("td", { class: "num" }, b));
+  put($("compare"), ref || par ? h("table", {}, h("tr", {}, h("th", {}, ""), h("th", { class: "num" }, "Standard (sequential, 1 process)"), h("th", { class: "num" }, "Cluster (parallel + distributed)")),
+    row("Executed on", ref?.node || "—", par ? `${par.worker_count} Worker Node(s): ${par.workers.join(", ")}` : "—"),
+    row("Parallel regions time (T_seq / T_par)", ms(ref?.t_seq_ms), ms(par?.t_par_ms)),
+    row("Whole program wall time", ms(ref?.wall_ms), ms(par?.wall_ms)),
+    row("Tasks / retries", "1 / 0", par ? `${par.tasks} / ${par.retries}` : "—"),
+    row("Preparation overhead (screening, AST, smoke test)", ms(std?.metrics?.preparation_ms ?? cl?.metrics?.preparation_ms), ms(m.preparation_ms)),
+    row("Speedup T_seq / T_par (regions)", "1.00×", h("b", {}, x(m.speedup))),
+    row("Speedup (whole program)", "1.00×", x(m.program_speedup)),
+    row("Output validation (FR-5.2)", "reference", cl?.validation ? h("span", { class: cls(cl.validation.status) }, `${cl.validation.status} — ${cl.validation.method}${cl.validation.detail ? ": " + cl.validation.detail : ""}`) : "—"),
+    ...(par?.regions || []).map((r) => row(`  region ${r.id} ${r.kind} (line ${r.line})`, ms(ref?.regions?.[r.id]),
+      `${ms(r.t_par_ms)} · ${r.tasks} tasks · smoke ${ms(r.smoke_ms)} · timeout ${r.timeout_s ?? "—"} s${r.early_stop ? " · " + r.early_stop : ""}`))) : "");
+  const sw = runs.filter((r) => r.mode === "sweep" && r.sweep?.length).pop();
+  put($("sweep"), sw ? h("div", {}, h("b", {}, "Speedup vs. Worker Nodes "), h("span", { class: "muted" }, `T_seq ${ms(sw.metrics?.standard?.t_seq_ms)}`),
+    h("table", {}, h("tr", {}, h("th", {}, "Workers"), h("th", { class: "num" }, "T_par"), h("th", { class: "num" }, "Speedup"), h("th", {}, "Validation")),
+      ...sw.sweep.map((p) => h("tr", {}, h("td", {}, p.workers), h("td", { class: "num" }, ms(p.t_par_ms)), h("td", { class: "num" }, x(p.speedup)), h("td", {}, tag(p.validation))))),
+    sw.files?.includes("speedup.svg") ? h("img", { src: `/api/runs/${sw.id}/files/speedup.svg`, alt: "speedup graph" }) : null) : "");
+  const outs = [];  // previews only; the full outputs are files of the run (result.txt, reference_output.txt)
+  const out = (title, m, runId, file) => [h("b", {}, title + " "), runId ? h("a", { href: `/api/runs/${runId}/files/${file}` },
+    `full output (${m.stdout_bytes ?? 0} bytes)`) : null, h("pre", {}, (m.stdout_preview || "(no output)") +
+    ((m.stdout_bytes || 0) > (m.stdout_preview || "").length ? "\n… (preview; open the full output)" : ""))];
+  if (ref) outs.push(...out("Standard", ref, cl ? cl.id : std?.id, cl ? "reference_output.txt" : "result.txt"));
+  if (par) outs.push(...out("Cluster", par, cl.id, "result.txt"));
+  put($("outputs"), ...outs);
+  if (last) $("log").textContent = (last.logs || S.logs?.[last.id] || []).map((l) => `${l.ts} [${l.level}] ${l.msg}`).join("\n");
+}
+async function run(mode) {
+  try {
+    const w = $("workers").value;
+    const r = await api(`/api/jobs/${S.sel}/run`, { mode, debug: $("debug").value, workers: w ? +w : null });
+    r.logs = []; S.runs.set(r.id, r); renderRuns();
+  } catch (e) { msg(e.message, true); }
+}
+$("runStd").onclick = () => run("standard");
+$("runCl").onclick = () => run("cluster");
+$("runSweep").onclick = () => run("sweep");
+$("cancel").onclick = async () => {
+  const r = [...S.runs.values()].filter((r) => r.job_id === S.sel && (r.state === "RUNNING" || r.state === "PENDING")).pop();
+  if (r) try { await api(`/api/runs/${r.id}/cancel`, {}); } catch (e) { msg(e.message, true); }
+};
+
+// ---------------------------------------------------------------- system self-test
+function renderSelftest(st) {
+  if (!st) return;
+  const head = st.status === "never run" ? "not run yet" : st.status === "running" ? `running… (started ${st.started_at})`
+    : `${st.status.toUpperCase()}: ${st.passed} of ${(st.tests || []).length} passed in ${st.duration_s} s`;
+  $("selftestBtn").disabled = st.status === "running" || st.available === false;
+  put($("selftest"), h("div", { class: st.status === "passed" ? "ok" : st.status === "failed" ? "bad" : "muted" },
+      st.available === false ? "pytest or tests/test_core_flow.py is not installed on this Master" : head),
+    (st.tests || []).length ? h("table", {}, h("tr", {}, h("th", {}, "#"), h("th", {}, "What is tested"), h("th", {}, "Result")),
+      ...st.tests.map((t, i) => h("tr", {}, h("td", {}, i + 1), h("td", {}, t.title),
+        h("td", {}, h("span", { class: { PASSED: "ok", FAILED: "bad", ERROR: "bad", "NOT RUN": "bad" }[t.result] || "muted" }, t.result))))) : null,
+    st.output ? h("details", {}, h("summary", {}, "pytest output"), h("pre", {}, st.output)) : null);
+}
+$("selftestBtn").onclick = async () => {
+  try { renderSelftest(await api("/api/selftest", {})); } catch (e) { msg(e.message, true); }
+};
+const refreshSelftest = async () => { try { renderSelftest(await api("/api/selftest")); } catch (e) { /* ignore */ } };
+
+// ---------------------------------------------------------------- settings (FR-1.8)
+const EDIT = { master: ["debug_level"], cluster: ["workers", "heartbeat_interval", "timeout_factor", "task_timeout_min", "retry_limit",
+  "chunk_factor", "chunk_size", "worker_wait_timeout", "run_timeout", "library_allowlist"] };
+function renderSettings() {
+  const c = S.config; if (!c) return;
+  const rows = [];
+  for (const [sec, keys] of Object.entries(EDIT)) for (const k of keys) {
+    const v = c[sec][k];
+    rows.push(h("tr", {}, h("td", {}, `${sec}.${k}`), h("td", {}, h("input", { "data-k": `${sec}.${k}`, value: Array.isArray(v) ? v.join(", ") : v, size: 50 }))));
+  }
+  for (const [k, v] of [["security.ai_mode", c.security.ai_mode], ["master.password", c.master.password || "not set"], ["cluster.token", c.cluster.token || "random per start (local)"]])
+    rows.push(h("tr", {}, h("td", {}, k), h("td", { class: "muted" }, `${v} (Administrator only)`)));
+  const save = h("button", { on: { click: async () => {
+    const body = {};
+    for (const inp of $("settings").querySelectorAll("input[data-k]")) {
+      const [sec, k] = inp.dataset.k.split("."), old = c[sec][k]; let v = inp.value.trim();
+      v = Array.isArray(old) ? (v ? v.split(",").map((s) => s.trim()).filter(Boolean) : []) : typeof old === "number" ? Number(v) : v;
+      if (JSON.stringify(v) !== JSON.stringify(old)) (body[sec] ||= {})[k] = v;
+    }
+    try { const r = await api("/api/config", body); S.config = r.config; msg("saved: " + (r.applied.join(", ") || "no change")); renderSettings(); }
+    catch (e) { msg(e.message, true); }
+  } } }, "Save");
+  put($("settings"), h("table", {}, ...rows), save, h("span", { class: "muted" }, " editable only when no run is active; an invalid value is rejected and the previous file stays in use"));
+}
+
+// ---------------------------------------------------------------- live feed
+S.logs = {};
+let refetch = null;
+function connect() {
+  const ws = new WebSocket((location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/ws");
+  ws.onmessage = (ev) => {
+    const e = JSON.parse(ev.data);
+    if (e.kind === "hello") {
+      S.status = e.status; S.config = e.config;
+      for (const j of e.jobs) S.jobs.set(j.id, j);
+      for (const r of e.runs) S.runs.set(r.id, r);
+      renderJobs(); renderStatus(); renderSettings();
+    } else if (e.kind === "status") { S.status = e.status; renderStatus(); }
+    else if (e.kind === "selftest") { e.selftest.status === "running" ? renderSelftest(e.selftest) : refreshSelftest(); }
+    else if (e.kind === "job") {
+      S.jobs.set(e.job.id, e.job); renderJobs();
+      if (e.job.id === S.sel) { clearTimeout(refetch); refetch = setTimeout(() => select(S.sel), 150); }
+    } else if (e.kind === "run") {
+      const old = S.runs.get(e.run.id) || {};
+      S.runs.set(e.run.id, { ...e.run, logs: old.logs || [] }); renderJobs();
+      if (e.run.job_id === S.sel) renderRuns();
+    } else if (e.kind === "log" && e.run) {
+      const r = S.runs.get(e.run); if (r) { (r.logs ||= []).push(e); if (r.job_id === S.sel) $("log").textContent += `${e.ts} [${e.level}] ${e.msg}\n`; }
+    }
+  };
+  ws.onclose = () => { $("status").textContent = "disconnected — reconnecting…"; setTimeout(connect, 1500); };
+}
+api("/api/examples").then((d) => {
+  for (const ex of d.examples) { S.examples[ex.filename] = ex; $("example").append(h("option", { value: ex.filename }, `${ex.label} — expect ${ex.expect}`)); }
+});
+connect();
+refreshSelftest();
+</script>
+</body>
+</html>

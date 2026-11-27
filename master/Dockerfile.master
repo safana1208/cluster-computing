@@ -1,0 +1,32 @@
+# Master Node for the docker-compose deployment: dashboard + pipeline.
+# Security screening uses the AI node (ai_engine) and the AST node (ast_detection) over the internal
+# network; the SRS SAST policy and the cluster-eligibility analysis run in worker processes here.
+# The task scheduler runs here too, with local Worker Node agents (cluster.local_workers); Raspberry Pi
+# Worker Nodes need only worker/worker.py and Python 3 (see README).
+FROM python:3.13-slim-trixie
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PYTHONHASHSEED=0 \
+    ASTMASTER_PATH=/opt/ast_master \
+    MASTER_CONFIG=/app/master/control_parameters.compose.toml
+
+COPY dashboard/requirements.txt /tmp/requirements.txt
+RUN pip install --only-binary=:all: -r /tmp/requirements.txt pytest && rm /tmp/requirements.txt
+RUN useradd --uid 10001 --no-create-home --shell /usr/sbin/nologin master && install -d -o master -g master /data
+COPY vendor/ast_master /opt/ast_master
+WORKDIR /app
+COPY analyzer ./analyzer
+COPY worker ./worker
+COPY examples ./examples
+COPY tests/test_core_flow.py ./tests/test_core_flow.py
+COPY pytest.ini ./
+COPY master ./master
+
+USER master
+EXPOSE 8080
+HEALTHCHECK --interval=5s --timeout=3s --retries=24 \
+  CMD ["python", "-c", "import json,urllib.request; assert json.load(urllib.request.urlopen('http://127.0.0.1:8080/api/health', timeout=2))['ready']"]
+CMD ["python", "-m", "master", "serve"]

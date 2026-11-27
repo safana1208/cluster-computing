@@ -1,0 +1,62 @@
+# Control Parameter File of the Master Node (SRS FR-1.2 / FR-1.8).
+# Validated on start-up: an invalid value stops the Master with the field and the reason.
+# Relative paths are resolved against the project root.
+
+[master]
+host = "127.0.0.1"            # "0.0.0.0" to serve the dashboard on the LAN (then set a password)
+port = 8080
+data_dir = "master_data"      # working copies, quarantine, run folders, logs, run history database
+max_file_bytes = 1048576      # 1 MB per submitted .py file
+password = ""                 # protected (Administrator). Non-empty = HTTP Basic auth on the dashboard
+import_poll_seconds = 2.0     # FR-1.11: .py files dropped into <data_dir>/import are submitted; 0 = off
+reset_on_start = true         # wipe the run history database + run files at every start (Raspberry Pi storage)
+debug_level = "basic"         # default debug level of a run (FR-1.9): basic | detailed | debug
+max_input_bytes = 33554432    # input files submitted with a program (total, 32 MB)
+
+[pipeline]
+pipeline_threads = 4          # jobs processed concurrently (I/O-bound orchestration threads)
+precheck_processes = 2        # worker processes for syntax validation (CPU-bound, isolated from the Master)
+precheck_timeout = 10.0
+sandbox_retries = 1           # retry on a fresh sandbox after a crash/timeout (infrastructure failure)
+
+[sandbox]
+backend = "docker"            # docker (isolated) | process (NO isolation, development only)
+mode = "warm"                 # warm: pool of long-lived sandboxes (fast) | ephemeral: one container per file
+pool_size = 2                 # sandboxes inspecting files in parallel
+image = "scs-inspector:latest"
+memory = "512m"
+cpus = 1.0
+pids_limit = 64
+job_timeout = 20.0            # seconds per inspection; the sandbox is killed and replaced on timeout
+start_timeout = 90.0
+max_jobs_per_sandbox = 200    # recycle a warm sandbox after this many files
+artifacts_dir = "artifacts"   # trained AI models, mounted read-only into the sandbox
+
+[security]
+ai_mode = "local"             # protected. local = SAST policy + AST Master + AI models; off = static layers only
+malicious_action = "delete"   # delete | quarantine (kept read-only in <data_dir>/quarantine for forensics)
+block_on_suspicious = false   # SRS: Low/Medium findings are warnings and the run continues
+output_dirs = ["output"]      # the only folder a program may open for writing
+
+[cluster]
+# Worker Nodes pull tasks from the Master over TCP + JSON lines (OI-05), authenticated with the token.
+workers = []                  # allowed Worker Node hosts, e.g. ["192.168.1.21", "192.168.1.22"]; [] = any host
+bind = "127.0.0.1"            # "0.0.0.0" so Raspberry Pi Worker Nodes on the LAN can connect (then set token)
+port = 7070
+token = ""                    # protected (Administrator): shared cluster token, >= 16 chars; "" = random, local only
+local_workers = 4             # Worker Node agents started on this machine (set 0 on a real Raspberry Pi cluster)
+worker_slots = 1              # tasks run at once by each local Worker Node
+heartbeat_interval = 2.0      # FR-4.6: H seconds; Suspect after 2 missed heartbeats, Dead after 3
+timeout_factor = 10.0         # FR-4.6: task timeout = smoke-test duration x factor (slower Pi nodes) ...
+task_timeout_min = 5.0        # ... but at least this many seconds
+retry_limit = 2               # FR-5.3: retries per task after an infrastructure failure
+chunk_factor = 4              # SRS 5.3.4: chunks = factor x active Worker Node slots ...
+chunk_size = 0                # ... or a fixed number of items per chunk (0 = use chunk_factor)
+worker_wait_timeout = 30.0    # AF-5.4.1: how long tasks wait for an available Worker Node
+run_timeout = 300.0           # time limit of one program run (reference run / transformed program)
+max_message_bytes = 16777216  # OI-18: a chunk whose task message is larger is split further
+task_memory_mb = 512          # NFR-2.3 / OI-07: memory limit of every task process
+run_memory_mb = 1024          # NFR-2.6: memory limit of the transformed program on the Master
+isolation = "auto"            # auto: no-network user namespace (uid nobody) when available | unshare (required) | none
+library_allowlist = ["math", "hashlib", "re", "string", "itertools", "collections", "json", "datetime",
+                     "os.path", "os.listdir", "os.walk", "glob"]

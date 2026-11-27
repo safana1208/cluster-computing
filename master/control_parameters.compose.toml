@@ -1,0 +1,29 @@
+# Control Parameter File used by `docker compose up` (selected via MASTER_CONFIG in Dockerfile.master).
+# The Master Node runs in its own hardened container and uses the AST node and the AI node.
+
+[master]
+host = "0.0.0.0"              # inside the container; compose publishes it on 127.0.0.1:8080 by default
+port = 8080
+data_dir = "/data"            # named volume master_data
+password = ""                 # set this if you publish the dashboard on the LAN (MASTER_BIND=0.0.0.0)
+import_poll_seconds = 2.0
+
+[pipeline]
+pipeline_threads = 4
+precheck_processes = 2
+
+[sandbox]
+backend = "services"          # inspection workers here; AST + AI on the ast_detection / ai_engine nodes
+ai_engine_url = "http://ai_engine:8100"
+pool_size = 2
+job_timeout = 20.0
+
+[security]
+ai_mode = "local"             # local = SAST policy + AST node + AI node
+malicious_action = "delete"
+
+[cluster]
+workers = []                  # allowed Worker Node hosts; [] = any host with the cluster token
+bind = "127.0.0.1"            # local Worker Nodes only; for Raspberry Pi nodes use "0.0.0.0", publish 7070 and set token
+local_workers = 4
+chunk_factor = 4
