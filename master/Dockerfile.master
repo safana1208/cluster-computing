@@ -13,16 +13,16 @@ ENV PYTHONUNBUFFERED=1 \
     ASTMASTER_PATH=/opt/ast_master \
     MASTER_CONFIG=/app/master/control_parameters.compose.toml
 
-COPY dashboard/requirements.txt /tmp/requirements.txt
+COPY master/dashboard/requirements.txt /tmp/requirements.txt
 RUN pip install --only-binary=:all: -r /tmp/requirements.txt pytest && rm /tmp/requirements.txt
 RUN useradd --uid 10001 --no-create-home --shell /usr/sbin/nologin master && install -d -o master -g master /data
-COPY vendor/ast_master /opt/ast_master
+COPY analyzer/vendor/ast_master /opt/ast_master
 WORKDIR /app
 COPY analyzer ./analyzer
 COPY worker ./worker
 COPY examples ./examples
 COPY tests/test_core_flow.py ./tests/test_core_flow.py
-COPY pytest.ini ./
+COPY tests/pytest.ini ./tests/pytest.ini
 COPY master ./master
 
 USER master

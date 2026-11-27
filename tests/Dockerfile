@@ -10,20 +10,18 @@ ENV PYTHONUNBUFFERED=1 \
     ARTIFACT_DIR=/artifacts \
     SAMPLES_DIR=/app/samples
 
-COPY ai_engine/requirements.txt /tmp/ai_engine/requirements.txt
+COPY analyzer/ai_engine/requirements.txt /tmp/analyzer/ai_engine/requirements.txt
 COPY tests/requirements.txt /tmp/tests/requirements.txt
-RUN pip install --only-binary=:all: -r /tmp/tests/requirements.txt && rm -r /tmp/ai_engine /tmp/tests
+RUN pip install --only-binary=:all: -r /tmp/tests/requirements.txt && rm -r /tmp/analyzer /tmp/tests
 RUN useradd --uid 10001 --create-home tester && install -d -o tester -g tester /results
-COPY vendor/ast_master /opt/ast_master
+COPY analyzer/vendor/ast_master /opt/ast_master
 WORKDIR /app
-COPY ai_engine ./ai_engine
 COPY analyzer ./analyzer
 COPY master ./master
 COPY worker ./worker
-COPY samples ./samples
+COPY tests/samples ./samples
 COPY examples ./examples
 COPY tests ./tests
-COPY pytest.ini ./
 
 USER tester
-CMD ["python", "-m", "pytest", "-v", "--junitxml=/results/junit.xml"]
+CMD ["python", "-m", "pytest", "tests", "-v", "--junitxml=/results/junit.xml"]

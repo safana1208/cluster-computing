@@ -61,7 +61,7 @@ class SandboxSection:
     job_timeout: float = 20.0
     start_timeout: float = 90.0
     max_jobs_per_sandbox: int = 200       # recycle a sandbox after this many inspections
-    artifacts_dir: str = "artifacts"      # trained models, mounted read-only
+    artifacts_dir: str = "shared/artifacts"      # trained models, mounted read-only
 
 
 @dataclass

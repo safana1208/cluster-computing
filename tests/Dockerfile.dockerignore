@@ -1,0 +1,15 @@
+# Build-context exclusions for this Dockerfile (BuildKit reads <Dockerfile>.dockerignore).
+**/__pycache__
+**/*.pyc
+**/.pytest_cache
+.venv
+.git
+**/*.joblib
+# trained models are mounted at /artifacts at runtime, never baked into images
+shared/artifacts
+# real (possibly malicious) training packages and the scan lab: mounted read-only, never baked in
+shared/datasets
+shared/supply_chain_lab
+# Master Node runtime data (untrusted submissions, quarantine)
+master_data
+**/master_data

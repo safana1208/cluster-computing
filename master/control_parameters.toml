@@ -30,7 +30,7 @@ pids_limit = 64
 job_timeout = 20.0            # seconds per inspection; the sandbox is killed and replaced on timeout
 start_timeout = 90.0
 max_jobs_per_sandbox = 200    # recycle a warm sandbox after this many files
-artifacts_dir = "artifacts"   # trained AI models, mounted read-only into the sandbox
+artifacts_dir = "shared/artifacts"   # trained AI models, mounted read-only into the sandbox
 
 [security]
 ai_mode = "local"             # protected. local = SAST policy + AST Master + AI models; off = static layers only

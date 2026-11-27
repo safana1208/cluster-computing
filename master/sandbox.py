@@ -64,7 +64,7 @@ def docker_available() -> tuple[bool, str]:
 
 
 #: Everything the Dockerfile copies into the image. Their hash is stamped on the image as a label.
-IMAGE_SOURCES = ("master/Dockerfile", "ai_engine", "analyzer", "vendor/ast_master",
+IMAGE_SOURCES = ("master/Dockerfile", "analyzer",
                  "master/__init__.py", "master/eligibility.py", "master/inspector.py")
 
 

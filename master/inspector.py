@@ -46,7 +46,7 @@ COMPILE_ONLY_RULES = frozenset({"compile", "builtins.compile"})
 
 
 class InProcessASTClient:
-    """Stands in for ``ai_engine.ast_client.ASTServiceClient`` without HTTP: the sandbox has no network.
+    """Stands in for ``analyzer.ai_engine.ast_client.ASTServiceClient`` without HTTP: the sandbox has no network.
 
     Every result still goes through the client's schema / identity / feature-digest verification.
     """
@@ -55,7 +55,7 @@ class InProcessASTClient:
         self.analyzer = analyzer
 
     def analyze_batch(self, packages: list[dict[str, Any]], chunk_size: int = 100) -> list[dict[str, Any]]:
-        from ai_engine.ast_client import ASTServiceClient
+        from analyzer.ai_engine.ast_client import ASTServiceClient
 
         return [ASTServiceClient.verify(self.analyzer.analyze(p["name"], p["files"]), expected_name=p["name"])
                 for p in packages]
@@ -68,7 +68,7 @@ class RemoteRiskEngine:
     """The AI node (``ai_engine`` service) over HTTP; it calls the AST node (``ast_detection``) itself.
 
     Used by the docker-compose deployment: Master Node -> AI node -> AST node. Same report format
-    as the in-process :class:`ai_engine.predict.RiskEngine`.
+    as the in-process :class:`analyzer.ai_engine.predict.RiskEngine`.
     """
 
     def __init__(self, url: str, timeout: float = 15.0, wait: float = 60.0) -> None:
@@ -130,10 +130,10 @@ class Inspector:
                 self.ai_error = f"{type(exc).__name__}: {exc}"[:300]
         elif ai_mode == "local":
             try:
-                from ai_engine.events import EventEmitter
-                from ai_engine.predict import RiskEngine
+                from analyzer.ai_engine.events import EventEmitter
+                from analyzer.ai_engine.predict import RiskEngine
 
-                self.engine = RiskEngine(artifact_dir or os.environ.get("ARTIFACT_DIR", "artifacts"),
+                self.engine = RiskEngine(artifact_dir or os.environ.get("ARTIFACT_DIR", "shared/artifacts"),
                                          InProcessASTClient(self.analyzer), EventEmitter("ai_engine", url=""))
                 meta = self.engine.scorer.metadata
                 self.model_info = {"trained_at": meta.get("created_at"),
